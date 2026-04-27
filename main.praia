@@ -1,0 +1,127 @@
+// arp — cross-platform ARP table access for Praia
+//
+// Usage:
+//   use "arp"
+//
+//   let entries = arp.table()           // all entries
+//   let entry = arp.lookup("10.0.0.1") // single IP
+//   let entry = arp.refresh("10.0.0.1") // ping to populate, then lookup
+//
+// Each entry is a map: {ip, mac, interface, hostname, state}
+
+let IS_LINUX = sys.platform == "linux"
+
+// Parse /proc/net/arp (Linux)
+func parseProc() {
+    let entries = []
+    let content = sys.read("/proc/net/arp")
+    let lines = content.split("\n")
+    // Skip header: "IP address  HW type  Flags  HW address  Mask  Device"
+    for (i in 1..len(lines)) {
+        let line = lines[i].strip()
+        if (len(line) == 0) { continue }
+        // Split on whitespace
+        let parts = []
+        let current = ""
+        for (ch in line) {
+            if (ch == " " || ch == "\t") {
+                if (len(current) > 0) {
+                    push(parts, current)
+                    current = ""
+                }
+            } else {
+                current = current + ch
+            }
+        }
+        if (len(current) > 0) { push(parts, current) }
+        if (len(parts) < 6) { continue }
+
+        let mac = parts[3]
+        if (mac == "00:00:00:00:00:00") { continue }
+
+        push(entries, {
+            ip: parts[0],
+            mac: mac,
+            interface: parts[5],
+            hostname: "",
+            state: (parts[2] == "0x2") ? "reachable" : "stale"
+        })
+    }
+    return entries
+}
+
+// Parse "arp -a" output (macOS / BSD)
+func parseArpCommand() {
+    let entries = []
+    let r = sys.exec(["arp", "-a"])
+    if (r.exitCode != 0) { return entries }
+    let lines = r.stdout.split("\n")
+    for (line in lines) {
+        let stripped = line.strip()
+        if (len(stripped) == 0) { continue }
+        // Format: "hostname (IP) at MAC on IFACE ..."
+        // or:     "? (IP) at MAC on IFACE ..."
+        if (!stripped.contains(" at ")) { continue }
+
+        // Extract IP from parentheses
+        let ipMatch = stripped.match("\\(([0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)\\)")
+        if (!ipMatch) { continue }
+        let ip = ipMatch.groups[0]
+
+        // Extract MAC
+        let macMatch = stripped.match("at ([0-9a-fA-F:]+)")
+        if (!macMatch) { continue }
+        let mac = macMatch.groups[0]
+        if (mac == "(incomplete)") { continue }
+
+        // Extract interface
+        let ifMatch = stripped.match("on (\\w+)")
+        let iface = ifMatch ? ifMatch.groups[0] : ""
+
+        // Extract hostname (everything before the first "(")
+        let hostname = ""
+        let parenIdx = stripped.indexOf("(")
+        if (parenIdx > 0) {
+            hostname = stripped.slice(0, parenIdx).strip()
+            if (hostname == "?") { hostname = "" }
+        }
+
+        push(entries, {
+            ip: ip,
+            mac: mac,
+            interface: iface,
+            hostname: hostname,
+            state: "reachable"
+        })
+    }
+    return entries
+}
+
+// Get the full ARP table
+func table() {
+    if (IS_LINUX) {
+        return parseProc()
+    }
+    return parseArpCommand()
+}
+
+// Look up a single IP in the ARP table
+func lookup(ip) {
+    let entries = table()
+    for (entry in entries) {
+        if (entry.ip == ip) { return entry }
+    }
+    return nil
+}
+
+// Ping an IP to populate the ARP table, then look it up
+func refresh(ip) {
+    if (sys.platform == "darwin") {
+        sys.exec(["ping", "-c", "1", "-W", "1000", ip])
+    } else {
+        sys.exec(["ping", "-c", "1", "-W", "1", ip])
+    }
+    return lookup(ip)
+}
+
+export { table, lookup, refresh }
