@@ -1,6 +1,6 @@
 name: praia-arp
 version: 0.1.0
-description: arp for praia
+description: Cross-platform ARP table access for Praia
 Author: Viggo Lekdorf
 license: MIT
 main: main.praia
