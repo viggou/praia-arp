@@ -1,5 +1,5 @@
 # praia-arp
-Cross-platform ARP table access for Praia
+Cross-platform ARP table access for [Praia](https://praia.sh)
 
 ## Install
 ```praia
