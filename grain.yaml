@@ -1,4 +1,4 @@
-name: praia-arp
+name: arp
 version: 0.1.0
 description: Cross-platform ARP table access for Praia
 Author: Viggo Lekdorf
