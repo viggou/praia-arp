@@ -34,7 +34,7 @@ func parseProc() {
 // Parse "arp -a" output (macOS / BSD)
 // Format: "hostname (IP) at MAC on IFACE ..." or "? (IP) at MAC on IFACE ..."
 func parseArpCommand() {
-    let r = sys.exec(["arp", "-a"])
+    let r = sys.exec(["arp", "-an"])
     if (r.exitCode != 0) { return [] }
     let entries = []
     for (line in r.stdout.split("\n")) {
@@ -64,18 +64,11 @@ func parseArpCommand() {
             iface = ifEnd >= 0 ? afterOn.slice(0, ifEnd) : afterOn
         }
 
-        // Hostname: everything before the first "("
-        let hostname = ""
-        if (open > 0) {
-            hostname = stripped.slice(0, open).strip()
-            if (hostname == "?") { hostname = "" }
-        }
-
         push(entries, {
             ip: ip,
             mac: mac,
             interface: iface,
-            hostname: hostname,
+            hostname: "",
             state: "reachable"
         })
     }
@@ -90,7 +83,7 @@ func table() {
 
 // Look up a single IP in the ARP table
 func lookup(ip) {
-    return table().find(lam{ e in e.ip == ip }) ?? nil
+    return table().find(lam{ e in e.ip == ip })
 }
 
 // Ping an IP to populate the ARP table, then look it up
@@ -98,11 +91,8 @@ func refresh(ip, timeout = 1000) {
     try {
         net.ping(ip, timeout)
     } catch (e) {
-        if (IS_LINUX) {
-            sys.exec(["ping", "-c", "1", "-W", "1", ip])
-        } else {
-            sys.exec(["ping", "-c", "1", "-W", "1", ip])
-        }
+        // net.ping needs root on Linux — fall back to system ping
+        sys.exec(["ping", "-c", "1", "-W", "1", ip])
     }
     return lookup(ip)
 }
