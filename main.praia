@@ -34,28 +34,25 @@ func parseProc() {
 // Parse "arp -a" output (macOS / BSD)
 // Format: "hostname (IP) at MAC on IFACE ..." or "? (IP) at MAC on IFACE ..."
 func parseArpCommand() {
-    let r = sys.exec(["arp", "-an"])
+    let r = sys.exec(["arp", "-a"])
     if (r.exitCode != 0) { return [] }
     let entries = []
     for (line in r.stdout.split("\n")) {
         let stripped = line.strip()
         if (!stripped.contains(" at ")) { continue }
+        if (stripped.contains("(incomplete)")) { continue }
 
-        // Extract IP from parentheses
         let open = stripped.indexOf("(")
         let close = stripped.indexOf(")")
         if (open < 0 || close < 0 || close <= open) { continue }
         let ip = stripped.slice(open + 1, close)
 
-        // Extract MAC: text between "at " and next space
         let atIdx = stripped.indexOf(" at ")
         if (atIdx < 0) { continue }
         let afterAt = stripped.slice(atIdx + 4)
         let macEnd = afterAt.indexOf(" ")
         let mac = macEnd >= 0 ? afterAt.slice(0, macEnd) : afterAt
-        if (mac == "(incomplete)") { continue }
 
-        // Extract interface: text between "on " and next space
         let iface = ""
         let onIdx = stripped.indexOf(" on ")
         if (onIdx >= 0) {
@@ -64,11 +61,17 @@ func parseArpCommand() {
             iface = ifEnd >= 0 ? afterOn.slice(0, ifEnd) : afterOn
         }
 
+        let hostname = ""
+        if (open > 0) {
+            hostname = stripped.slice(0, open).strip()
+            if (hostname == "?") { hostname = "" }
+        }
+
         push(entries, {
             ip: ip,
             mac: mac,
             interface: iface,
-            hostname: "",
+            hostname: hostname,
             state: "reachable"
         })
     }
