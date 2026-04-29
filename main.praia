@@ -13,22 +13,22 @@ let IS_LINUX = sys.platform == "linux"
 
 // Parse /proc/net/arp (Linux)
 func parseProc() {
-    let lines = sys.read("/proc/net/arp").split("\n")
-    let entries = []
-    for (i in 1..len(lines)) {
-        let parts = lines[i].replacePattern("\\s+", " ").strip().split(" ")
-        if (len(parts) < 6) { continue }
-        let mac = parts[3]
-        if (mac == "00:00:00:00:00:00") { continue }
-        push(entries, {
-            ip: parts[0],
-            mac: mac,
-            interface: parts[5],
-            hostname: "",
-            state: (parts[2] == "0x2") ? "reachable" : "stale"
+    let lines = sys.readLines("/proc/net/arp")
+    return lines.slice(1)
+        |> filter(lam{
+            let parts = it.replacePattern("\\s+", " ").strip().split(" ")
+            return len(parts) >= 6 && parts[3] != "00:00:00:00:00:00"
         })
-    }
-    return entries
+        |> map(lam{
+            let parts = it.replacePattern("\\s+", " ").strip().split(" ")
+            return {
+                ip: parts[0],
+                mac: parts[3],
+                interface: parts[5],
+                hostname: "",
+                state: (parts[2] == "0x2") ? "reachable" : "stale"
+            }
+        })
 }
 
 // Parse "arp -a" output (macOS / BSD)
@@ -36,46 +36,44 @@ func parseProc() {
 func parseArpCommand() {
     let r = sys.exec(["arp", "-a"])
     if (r.exitCode != 0) { return [] }
-    let entries = []
-    for (line in r.stdout.split("\n")) {
-        let stripped = line.strip()
-        if (!stripped.contains(" at ")) { continue }
-        if (stripped.contains("(incomplete)")) { continue }
+    return r.stdout.split("\n")
+        |> filter(lam{ it.strip().contains(" at ") && !it.contains("(incomplete)") })
+        |> map(lam{
+            let stripped = it.strip()
+            let open = stripped.indexOf("(")
+            let close = stripped.indexOf(")")
+            if (open < 0 || close <= open) { return nil }
+            let ip = stripped.slice(open + 1, close)
 
-        let open = stripped.indexOf("(")
-        let close = stripped.indexOf(")")
-        if (open < 0 || close < 0 || close <= open) { continue }
-        let ip = stripped.slice(open + 1, close)
+            let atIdx = stripped.indexOf(" at ")
+            if (atIdx < 0) { return nil }
+            let afterAt = stripped.slice(atIdx + 4)
+            let macEnd = afterAt.indexOf(" ")
+            let mac = macEnd >= 0 ? afterAt.slice(0, macEnd) : afterAt
 
-        let atIdx = stripped.indexOf(" at ")
-        if (atIdx < 0) { continue }
-        let afterAt = stripped.slice(atIdx + 4)
-        let macEnd = afterAt.indexOf(" ")
-        let mac = macEnd >= 0 ? afterAt.slice(0, macEnd) : afterAt
+            let iface = ""
+            let onIdx = stripped.indexOf(" on ")
+            if (onIdx >= 0) {
+                let afterOn = stripped.slice(onIdx + 4)
+                let ifEnd = afterOn.indexOf(" ")
+                iface = ifEnd >= 0 ? afterOn.slice(0, ifEnd) : afterOn
+            }
 
-        let iface = ""
-        let onIdx = stripped.indexOf(" on ")
-        if (onIdx >= 0) {
-            let afterOn = stripped.slice(onIdx + 4)
-            let ifEnd = afterOn.indexOf(" ")
-            iface = ifEnd >= 0 ? afterOn.slice(0, ifEnd) : afterOn
-        }
+            let hostname = ""
+            if (open > 0) {
+                hostname = stripped.slice(0, open).strip()
+                if (hostname == "?") { hostname = "" }
+            }
 
-        let hostname = ""
-        if (open > 0) {
-            hostname = stripped.slice(0, open).strip()
-            if (hostname == "?") { hostname = "" }
-        }
-
-        push(entries, {
-            ip: ip,
-            mac: mac,
-            interface: iface,
-            hostname: hostname,
-            state: "reachable"
+            return {
+                ip: ip,
+                mac: mac,
+                interface: iface,
+                hostname: hostname,
+                state: "reachable"
+            }
         })
-    }
-    return entries
+        |> filter(lam{ it != nil })
 }
 
 // Get the full ARP table
