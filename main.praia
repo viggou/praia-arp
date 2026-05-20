@@ -13,7 +13,7 @@ let IS_LINUX = sys.platform == "linux"
 
 // Parse /proc/net/arp (Linux)
 func parseProc() {
-    let lines = sys.readLines("/proc/net/arp")
+    let lines = fs.readLines("/proc/net/arp")
     return lines.slice(1)
         |> filter(lam{
             let parts = it.replacePattern("\\s+", " ").strip().split(" ")
