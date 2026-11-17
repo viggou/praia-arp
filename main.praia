@@ -11,6 +11,20 @@
 
 let IS_LINUX = sys.platform == "linux"
 
+// "0:1c:42:a:b:c" (as macOS's arp prints it) to "00:1c:42:0a:0b:0c";
+// nil if it isn't six hex octets
+func normalizeMac(mac) {
+    let parts = mac.lower().split(":")
+    if (len(parts) != 6) { return nil }
+    let out = []
+    for (p in parts) {
+        if (len(p) < 1 || len(p) > 2) { return nil }
+        for (c in p) { if (!"0123456789abcdef".contains(c)) { return nil } }
+        out.push(len(p) == 1 ? "0" + p : p)
+    }
+    return out.join(":")
+}
+
 // Parse /proc/net/arp (Linux)
 func parseProc() {
     let lines = fs.readLines("/proc/net/arp")
@@ -49,7 +63,8 @@ func parseArpCommand() {
             if (atIdx < 0) { return nil }
             let afterAt = stripped.slice(atIdx + 4)
             let macEnd = afterAt.indexOf(" ")
-            let mac = macEnd >= 0 ? afterAt.slice(0, macEnd) : afterAt
+            let mac = normalizeMac(macEnd >= 0 ? afterAt.slice(0, macEnd) : afterAt)
+            if (mac == nil) { return nil }
 
             let iface = ""
             let onIdx = stripped.indexOf(" on ")
@@ -92,8 +107,12 @@ func refresh(ip, timeout = 1000) {
     try {
         net.ping(ip, timeout)
     } catch (e) {
-        // net.ping needs root on Linux — fall back to system ping
-        sys.exec(["ping", "-c", "1", "-W", "1", ip])
+        // net.ping needs root on Linux — fall back to system ping, given
+        // the timeout in whole seconds: -W (reply wait) on Linux, -t (whole
+        // run) on macOS, whose -W is in milliseconds on top of a second
+        let secs = str(math.max(1, int((timeout + 999) / 1000)))
+        let flag = IS_LINUX ? "-W" : "-t"
+        sys.exec(["ping", "-c", "1", flag, secs, ip], timeout + 2000)
     }
     return lookup(ip)
 }
